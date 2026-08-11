@@ -166,6 +166,12 @@ async function handleTuneSubmission(request: Request, env: Env): Promise<Respons
   });
 
   if (!validated.ok) {
+    if (isHtmxRequest(request)) {
+      return htmlResponse(
+        renderSubmissionPanel(await listTags(env.DB), draft, { kind: 'error', message: validated.message }),
+      );
+    }
+
     return renderHomePage(request, env, new URL(request.url), {
       flash: { kind: 'error', message: validated.message },
       draft,
@@ -192,6 +198,15 @@ async function handleTuneSubmission(request: Request, env: Env): Promise<Respons
 
   await syncTuneTags(env.DB, insert.meta.last_row_id, tagIds);
 
+  if (isHtmxRequest(request)) {
+    return htmlResponse(
+      renderSubmissionPanel(await listTags(env.DB), emptySubmissionDraft(draft.returnTuneId), {
+        kind: 'success',
+        message: 'Thanks — your tune is waiting for a moderator.',
+      }),
+    );
+  }
+
   return redirectTo(request.url, '/?flash=submitted');
 }
 
@@ -201,7 +216,9 @@ async function handleVote(request: Request, env: Env, url: URL): Promise<Respons
   const value = Number.parseInt(String(formData.get('value') ?? ''), 10);
 
   if (!tuneId || ![-1, 1].includes(value)) {
-    return redirectTo(url.toString(), '/?flash=missing-tune');
+    return isHtmxRequest(request)
+      ? htmlResponse(renderVoteBoxError('That tune is gone. Reload for another one.'))
+      : redirectTo(url.toString(), '/?flash=missing-tune');
   }
 
   const tune = await env.DB
@@ -210,9 +227,12 @@ async function handleVote(request: Request, env: Env, url: URL): Promise<Respons
     .first<{ id: number }>();
 
   if (!tune) {
-    return redirectTo(url.toString(), '/?flash=missing-tune');
+    return isHtmxRequest(request)
+      ? htmlResponse(renderVoteBoxError('That tune is gone. Reload for another one.'))
+      : redirectTo(url.toString(), '/?flash=missing-tune');
   }
 
+  const visitorIp = getVisitorIp(request);
   await env.DB
     .prepare(
       `INSERT INTO votes (tune_id, visitor_ip, value)
@@ -220,8 +240,15 @@ async function handleVote(request: Request, env: Env, url: URL): Promise<Respons
        ON CONFLICT(tune_id, visitor_ip)
        DO UPDATE SET value = excluded.value, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
     )
-    .bind(tuneId, getVisitorIp(request), value)
+    .bind(tuneId, visitorIp, value)
     .run();
+
+  if (isHtmxRequest(request)) {
+    const updatedTune = await getAcceptedTune(env.DB, tuneId, visitorIp);
+    return htmlResponse(
+      updatedTune ? renderVoteBox(updatedTune) : renderVoteBoxError('That tune is gone. Reload for another one.'),
+    );
+  }
 
   return redirectTo(url.toString(), `/?tune=${tuneId}&flash=voted#vote`);
 }
@@ -573,6 +600,10 @@ function isModeratorPath(pathname: string): boolean {
   return pathname === '/kustode' || pathname.startsWith('/kustode/');
 }
 
+function isHtmxRequest(request: Request): boolean {
+  return request.headers.get('hx-request') === 'true';
+}
+
 export function checkBasicAuth(request: Request, env: Env): boolean {
   const authHeader = request.headers.get('authorization');
   if (!authHeader?.startsWith('Basic ')) return false;
@@ -679,6 +710,87 @@ function textResponse(body: string, status = 200): Response {
   });
 }
 
+function renderVoteBox(tune: HomeTune): string {
+  return `
+    <section id="vote" class="vote-box" aria-label="Vote on this tune">
+      <p>Worth keeping in the rotation?</p>
+      <div class="vote-buttons">
+        <form method="post" action="/vote" hx-post="/vote" hx-target="#vote" hx-swap="outerHTML">
+          <input type="hidden" name="tune_id" value="${tune.id}">
+          <input type="hidden" name="value" value="1">
+          <button class="vote ${tune.visitor_vote === 1 ? 'active up' : ''}" type="submit">👍 ${tune.upvotes}</button>
+        </form>
+        <form method="post" action="/vote" hx-post="/vote" hx-target="#vote" hx-swap="outerHTML">
+          <input type="hidden" name="tune_id" value="${tune.id}">
+          <input type="hidden" name="value" value="-1">
+          <button class="vote ${tune.visitor_vote === -1 ? 'active down' : ''}" type="submit">👎 ${tune.downvotes}</button>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
+function renderVoteBoxError(message: string): string {
+  return `
+    <section id="vote" class="vote-box" aria-label="Vote on this tune">
+      <p>${escapeHtml(message)}</p>
+    </section>
+  `;
+}
+
+function renderSubmissionPanel(tags: TagRow[], draft: SubmissionDraft, flash?: Flash): string {
+  const selectedTagIds = new Set(draft.tagIds);
+
+  return `
+    <div id="submit-panel" class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h2 id="submit-title">Submit a tune</h2>
+          <p class="help">Submissions land in the moderator queue at <code>/kustode</code>.</p>
+        </div>
+        <form method="dialog">
+          <button class="close" type="submit" aria-label="Close">×</button>
+        </form>
+      </div>
+      ${flash ? `<p class="flash ${flash.kind}">${escapeHtml(flash.message)}</p>` : ''}
+      <form method="post" action="/submit" hx-post="/submit" hx-target="#submit-panel" hx-swap="outerHTML">
+        <input type="hidden" name="return_tune_id" value="${draft.returnTuneId ?? ''}">
+        <label class="field">
+          <span>Title</span>
+          <input name="title" maxlength="${MAX_TITLE_LENGTH}" value="${escapeHtml(draft.title)}" required>
+        </label>
+        <label class="field">
+          <span>YouTube URL or video ID</span>
+          <input name="youtube_identifier" value="${escapeHtml(draft.youtubeInput)}" required>
+        </label>
+        <label class="field">
+          <span>Sheet music link</span>
+          <input name="sheet_music_reference" type="url" value="${escapeHtml(draft.sheetMusicReference)}" placeholder="https://thesession.org/...">
+        </label>
+        <label class="field">
+          <span>Notes</span>
+          <textarea name="notes" maxlength="${MAX_NOTES_LENGTH}" placeholder="Key, tuning, favourite recording, whatever helps.">${escapeHtml(draft.notes)}</textarea>
+        </label>
+        <div class="field">
+          <span>Tags</span>
+          ${
+            tags.length
+              ? `<div class="tag-grid">${tags
+                  .map(
+                    (tag) => `<label class="tag-choice"><input type="checkbox" name="tag_ids" value="${tag.id}" ${selectedTagIds.has(tag.id) ? 'checked' : ''}> <span>${escapeHtml(tag.name)}</span></label>`,
+                  )
+                  .join('')}</div>`
+              : '<p class="help">No tags yet. Submit anyway and a moderator can tidy it up.</p>'
+          }
+        </div>
+        <div class="modal-actions">
+          <button class="primary" type="submit">Send for review</button>
+        </div>
+      </form>
+    </div>
+  `;
+}
+
 function renderHomeHtml({
   flash,
   tune,
@@ -692,7 +804,6 @@ function renderHomeHtml({
   draft: SubmissionDraft;
   submissionOpen: boolean;
 }): string {
-  const selectedTagIds = new Set(draft.tagIds);
   const dialogOpen = submissionOpen ? ' open' : '';
   const tuneSection = tune
     ? `
@@ -719,21 +830,7 @@ function renderHomeHtml({
           }
           <a class="primary" href="/">Another tune</a>
         </div>
-        <section id="vote" class="vote-box" aria-label="Vote on this tune">
-          <p>Worth keeping in the rotation?</p>
-          <div class="vote-buttons">
-            <form method="post" action="/vote">
-              <input type="hidden" name="tune_id" value="${tune.id}">
-              <input type="hidden" name="value" value="1">
-              <button class="vote ${tune.visitor_vote === 1 ? 'active up' : ''}" type="submit">👍 ${tune.upvotes}</button>
-            </form>
-            <form method="post" action="/vote">
-              <input type="hidden" name="tune_id" value="${tune.id}">
-              <input type="hidden" name="value" value="-1">
-              <button class="vote ${tune.visitor_vote === -1 ? 'active down' : ''}" type="submit">👎 ${tune.downvotes}</button>
-            </form>
-          </div>
-        </section>
+        ${renderVoteBox(tune)}
       </article>
     `
     : `
@@ -977,53 +1074,10 @@ function renderHomeHtml({
     </main>
 
     <dialog data-submit-dialog${dialogOpen} aria-labelledby="submit-title">
-      <div class="modal-card">
-        <div class="modal-head">
-          <div>
-            <h2 id="submit-title">Submit a tune</h2>
-            <p class="help">Submissions land in the moderator queue at <code>/kustode</code>.</p>
-          </div>
-          <form method="dialog">
-            <button class="close" type="submit" aria-label="Close">×</button>
-          </form>
-        </div>
-        <form method="post" action="/submit">
-          <input type="hidden" name="return_tune_id" value="${draft.returnTuneId ?? ''}">
-          <label class="field">
-            <span>Title</span>
-            <input name="title" maxlength="${MAX_TITLE_LENGTH}" value="${escapeHtml(draft.title)}" required>
-          </label>
-          <label class="field">
-            <span>YouTube URL or video ID</span>
-            <input name="youtube_identifier" value="${escapeHtml(draft.youtubeInput)}" required>
-          </label>
-          <label class="field">
-            <span>Sheet music link</span>
-            <input name="sheet_music_reference" type="url" value="${escapeHtml(draft.sheetMusicReference)}" placeholder="https://thesession.org/...">
-          </label>
-          <label class="field">
-            <span>Notes</span>
-            <textarea name="notes" maxlength="${MAX_NOTES_LENGTH}" placeholder="Key, tuning, favourite recording, whatever helps.">${escapeHtml(draft.notes)}</textarea>
-          </label>
-          <div class="field">
-            <span>Tags</span>
-            ${
-              tags.length
-                ? `<div class="tag-grid">${tags
-                    .map(
-                      (tag) => `<label class="tag-choice"><input type="checkbox" name="tag_ids" value="${tag.id}" ${selectedTagIds.has(tag.id) ? 'checked' : ''}> <span>${escapeHtml(tag.name)}</span></label>`,
-                    )
-                    .join('')}</div>`
-                : '<p class="help">No tags yet. Submit anyway and a moderator can tidy it up.</p>'
-            }
-          </div>
-          <div class="modal-actions">
-            <button class="primary" type="submit">Send for review</button>
-          </div>
-        </form>
-      </div>
+      ${renderSubmissionPanel(tags, draft)}
     </dialog>
 
+    <script src="https://unpkg.com/htmx.org@2/dist/htmx.min.js"></script>
     <script>
       const dialog = document.querySelector('[data-submit-dialog]');
       const openButtons = document.querySelectorAll('[data-open-submit]');
