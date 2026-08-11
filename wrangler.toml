@@ -1,6 +1,7 @@
 name = "jams-dk"
 main = "src/index.ts"
 compatibility_date = "2026-08-11"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = false
 
 routes = [
@@ -8,7 +9,12 @@ routes = [
   { pattern = "www.jams.dk", custom_domain = true }
 ]
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[d1_databases]]
 binding = "DB"
 database_name = "jamsdk"
 database_id = "bbc79207-7aaf-4eea-8c44-4df37a781446"
+migrations_dir = "migrations"

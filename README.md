@@ -1,17 +1,41 @@
-# D1 notes
+# jams.dk
 
-Tiny Cloudflare Worker app in TypeScript. Think “Flask, but on Workers”: one file, server-rendered HTML, D1 for storage, no frontend framework.
+A tiny Cloudflare Worker app for traditional folk musicians: load the front page, get a random accepted tune, watch a YouTube rendition, maybe click through to sheet music, and vote it up or down.
 
-## What you got
+## Stack
 
-- `src/index.ts` — Worker app
-- `migrations/0001_notes.sql` — example D1 schema
-- HTTP Basic Auth in front of the UI
-- a tiny note list/create/delete UI
+- Cloudflare Workers
+- D1 (SQLite)
+- server-rendered HTML + a little native `<dialog>` JS
+- `/kustode` moderator dashboard behind HTTP Basic Auth
 
-If your real schema is different, keep the setup and swap the SQL in `src/index.ts` + `migrations/0001_notes.sql`.
+No frontend framework, no user accounts, no client-side API layer.
 
-## Setup
+## Data model
+
+- `tunes`
+  - `id`
+  - `title`
+  - `notes`
+  - `youtube_identifier`
+  - `sheet_music_reference`
+  - `submitted_ip`
+  - `date_added`
+  - `date_accepted` nullable
+- `tags`
+- `tune_tags` many-to-many join table
+- `votes`
+  - one row per `(tune_id, visitor_ip)`
+  - `value` is `1` or `-1`
+
+## Routes
+
+- `/` — public front page and submission modal
+- `POST /submit` — public tune submission
+- `POST /vote` — public thumbs up/down
+- `/kustode` — moderator queue + tag manager
+
+## Local setup
 
 1. Install dependencies:
 
@@ -19,29 +43,25 @@ If your real schema is different, keep the setup and swap the SQL in `src/index.
    npm install
    ```
 
-2. Put your D1 details into `wrangler.toml`:
-
-   ```toml
-   [[d1_databases]]
-   binding = "DB"
-   database_name = "your-d1-name"
-   database_id = "your-d1-id"
-   ```
-
-3. Create local auth vars:
+2. Create local moderator credentials:
 
    ```bash
    cp .dev.vars.example .dev.vars
    ```
 
-4. Apply the migration:
+3. Apply D1 migrations locally:
 
    ```bash
-   npx wrangler d1 migrations apply your-d1-name --local
-   npx wrangler d1 migrations apply your-d1-name --remote
+   npx wrangler d1 migrations apply jamsdk --local
    ```
 
-5. Run it locally:
+4. Generate Worker typings after config changes:
+
+   ```bash
+   npm run types
+   ```
+
+5. Start the app:
 
    ```bash
    npm run dev
@@ -49,36 +69,26 @@ If your real schema is different, keep the setup and swap the SQL in `src/index.
 
 ## Deploy
 
-Set the auth secrets in Cloudflare:
+Set the moderator secrets in Cloudflare:
 
 ```bash
 npx wrangler secret put BASIC_AUTH_USER
 npx wrangler secret put BASIC_AUTH_PASSWORD
 ```
 
-Then deploy:
+Apply the remote migration and deploy:
 
 ```bash
+npx wrangler d1 migrations apply jamsdk --remote
 npm run deploy
 ```
 
-## Auto deploy from GitHub
+## Moderator flow
 
-This repo includes `.github/workflows/deploy.yml`.
-On every push to `main`, GitHub Actions will:
-
-1. `npm ci`
-2. run `npm run check`
-3. run `npm test`
-4. apply remote D1 migrations
-5. deploy the Worker
-
-Add these GitHub repository secrets:
-
-- `CLOUDFLARE_API_TOKEN`
-- `CLOUDFLARE_ACCOUNT_ID`
-
-Your Cloudflare API token needs permission to deploy Workers and apply D1 migrations.
+1. Open the front page and submit a tune.
+2. Visit `/kustode`.
+3. Review the submission, edit fields, assign tags, then accept or reject it.
+4. Accepted tunes start showing up on `/` immediately.
 
 ## Checks
 
@@ -86,3 +96,8 @@ Your Cloudflare API token needs permission to deploy Workers and apply D1 migrat
 npm run check
 npm test
 ```
+
+## Notes
+
+- `migrations/0002_tunes.sql` resets the old placeholder schema and creates the real app tables.
+- The front page stores votes by visitor IP using `CF-Connecting-IP` (or a local fallback in dev).

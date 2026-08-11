@@ -7,6 +7,7 @@
     "deploy": "wrangler deploy",
     "build": "tsc",
     "check": "tsc --noEmit",
+    "types": "wrangler types",
     "test": "npm run build && node --test dist/test/*.js"
   },
   "devDependencies": {
