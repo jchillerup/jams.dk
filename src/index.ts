@@ -713,18 +713,18 @@ function textResponse(body: string, status = 200): Response {
 function renderVoteBox(tune: HomeTune): string {
   return `
     <section id="vote" class="vote-box" aria-label="Vote on this tune">
-      <p>Worth keeping in the rotation?</p>
       <div class="vote-buttons">
         <form method="post" action="/vote" hx-post="/vote" hx-target="#vote" hx-swap="outerHTML">
           <input type="hidden" name="tune_id" value="${tune.id}">
           <input type="hidden" name="value" value="1">
-          <button class="vote ${tune.visitor_vote === 1 ? 'active up' : ''}" type="submit">👍 ${tune.upvotes}</button>
+          <button class="vote ${tune.visitor_vote === 1 ? 'active up' : ''}" type="submit" aria-label="Thumbs up">👍 ${tune.upvotes}</button>
         </form>
         <form method="post" action="/vote" hx-post="/vote" hx-target="#vote" hx-swap="outerHTML">
           <input type="hidden" name="tune_id" value="${tune.id}">
           <input type="hidden" name="value" value="-1">
-          <button class="vote ${tune.visitor_vote === -1 ? 'active down' : ''}" type="submit">👎 ${tune.downvotes}</button>
+          <button class="vote ${tune.visitor_vote === -1 ? 'active down' : ''}" type="submit" aria-label="Thumbs down">👎 ${tune.downvotes}</button>
         </form>
+        <a class="icon-button" href="/" aria-label="Another tune" title="Another tune">↻</a>
       </div>
     </section>
   `;
@@ -733,8 +733,35 @@ function renderVoteBox(tune: HomeTune): string {
 function renderVoteBoxError(message: string): string {
   return `
     <section id="vote" class="vote-box" aria-label="Vote on this tune">
-      <p>${escapeHtml(message)}</p>
+      <p class="vote-error">${escapeHtml(message)}</p>
+      <div class="vote-buttons">
+        <a class="icon-button" href="/" aria-label="Another tune" title="Another tune">↻</a>
+      </div>
     </section>
+  `;
+}
+
+function renderSheetMusicPanel(tune: HomeTune): string {
+  if (!tune.sheet_music_reference) return '';
+
+  return `
+    <aside class="sheet-panel">
+      <a
+        class="sheet-link"
+        href="${escapeHtml(tune.sheet_music_reference)}"
+        target="_blank"
+        rel="noopener noreferrer nofollow"
+        aria-label="Open sheet music"
+        title="Open sheet music"
+      >↗</a>
+      <iframe
+        class="sheet-frame"
+        src="${escapeHtml(tune.sheet_music_reference)}"
+        title="Sheet music for ${escapeHtml(tune.title)}"
+        loading="lazy"
+        referrerpolicy="strict-origin-when-cross-origin"
+      ></iframe>
+    </aside>
   `;
 }
 
@@ -807,36 +834,32 @@ function renderHomeHtml({
   const dialogOpen = submissionOpen ? ' open' : '';
   const tuneSection = tune
     ? `
-      <article class="tune-card">
-        <p class="eyebrow">today's nudge</p>
-        <h2>${escapeHtml(tune.title)}</h2>
-        ${renderTagBadges(tune.tags)}
-        <div class="embed">
-          <iframe
-            src="https://www.youtube.com/embed/${escapeHtml(tune.youtube_identifier)}"
-            title="${escapeHtml(tune.title)} on YouTube"
-            loading="lazy"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-            allowfullscreen
-            referrerpolicy="strict-origin-when-cross-origin"
-          ></iframe>
-        </div>
-        ${tune.notes ? `<p class="notes">${escapeHtml(tune.notes).replaceAll('\n', '<br>')}</p>` : ''}
-        <div class="links">
-          ${
-            tune.sheet_music_reference
-              ? `<a class="secondary" href="${escapeHtml(tune.sheet_music_reference)}" rel="noopener noreferrer nofollow">Sheet music</a>`
-              : ''
-          }
-          <a class="primary" href="/">Another tune</a>
-        </div>
-        ${renderVoteBox(tune)}
-      </article>
+      <section class="tune-stage ${tune.sheet_music_reference ? 'has-sheet' : 'solo'}">
+        <article class="tune-main">
+          <div class="video-frame">
+            <iframe
+              src="https://www.youtube.com/embed/${escapeHtml(tune.youtube_identifier)}"
+              title="${escapeHtml(tune.title)} on YouTube"
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowfullscreen
+              referrerpolicy="strict-origin-when-cross-origin"
+            ></iframe>
+          </div>
+          <div class="tune-meta">
+            <h1>${escapeHtml(tune.title)}</h1>
+            ${renderTagBadges(tune.tags)}
+            ${tune.notes ? `<p class="notes">${escapeHtml(tune.notes).replaceAll('\n', '<br>')}</p>` : ''}
+            ${renderVoteBox(tune)}
+          </div>
+        </article>
+        ${renderSheetMusicPanel(tune)}
+      </section>
     `
     : `
-      <article class="tune-card empty">
-        <h2>No accepted tune yet.</h2>
-        <p>Submit the first one below, then let a moderator bless it in <code>/kustode</code>.</p>
+      <article class="empty-state">
+        <h1>No accepted tune yet.</h1>
+        <p>Hit + and submit the first one.</p>
       </article>
     `;
 
@@ -849,101 +872,83 @@ function renderHomeHtml({
     <style>
       :root {
         color-scheme: light;
-        --bg: #f6efe2;
-        --card: #fffaf1;
-        --ink: #20160f;
-        --muted: #665448;
-        --line: #d9c8b6;
+        --bg: #f3ead8;
+        --panel: rgba(255, 250, 241, 0.88);
+        --panel-solid: #fffaf1;
+        --ink: #221810;
+        --muted: #6f5b4c;
+        --line: rgba(95, 66, 45, 0.14);
         --accent: #a53a1b;
-        --accent-ink: #fff7f1;
+        --accent-ink: #fff8f2;
         --good: #1c6b32;
         --bad: #8f2d2d;
+        --shadow: 0 1.25rem 3rem rgba(34, 24, 16, 0.10);
       }
       * { box-sizing: border-box; }
+      html, body { min-height: 100%; }
       body {
         margin: 0;
         font: 16px/1.5 system-ui, sans-serif;
         color: var(--ink);
-        background: radial-gradient(circle at top, #fff7e9, var(--bg));
+        background:
+          radial-gradient(circle at top, rgba(255,255,255,0.45), transparent 40%),
+          linear-gradient(180deg, #f8efdf 0%, var(--bg) 100%);
       }
       a { color: inherit; }
-      button, input, textarea {
-        font: inherit;
-      }
+      button, input, textarea { font: inherit; }
       .shell {
-        max-width: 68rem;
+        max-width: 92rem;
         margin: 0 auto;
-        padding: 2rem 1rem 4rem;
-      }
-      .hero {
-        display: grid;
-        gap: 1rem;
-        margin-bottom: 2rem;
-      }
-      h1 {
-        margin: 0;
-        font-size: clamp(2.5rem, 10vw, 5rem);
-        line-height: 0.95;
-        text-wrap: balance;
-      }
-      .lede {
-        max-width: 42rem;
-        margin: 0;
-        color: var(--muted);
-        font-size: 1.05rem;
-      }
-      .hero-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.75rem;
+        padding: 1rem 1rem 6rem;
       }
       .flash {
-        margin: 0 0 1.25rem;
+        margin: 0 0 1rem;
         padding: 0.9rem 1rem;
         border-radius: 1rem;
         border: 1px solid var(--line);
-        background: #fff;
+        background: rgba(255,255,255,0.8);
+        backdrop-filter: blur(12px);
       }
       .flash.error { border-color: #d7aaaa; color: #6f2020; }
       .flash.success { border-color: #b4c9b6; color: #194d25; }
-      .tune-card, .submit-card {
-        background: var(--card);
+      .tune-stage {
+        display: grid;
+        gap: 1rem;
+        align-items: start;
+      }
+      .tune-stage.has-sheet {
+        grid-template-columns: minmax(0, 1.7fr) minmax(18rem, 0.9fr);
+      }
+      .tune-main,
+      .sheet-panel,
+      .empty-state {
+        background: var(--panel);
         border: 1px solid var(--line);
-        border-radius: 1.5rem;
-        padding: 1.25rem;
-        box-shadow: 0 1rem 3rem rgba(32, 22, 15, 0.05);
+        border-radius: 1.6rem;
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(12px);
       }
-      .tune-card h2, .submit-card h2 {
-        margin: 0 0 0.75rem;
-        font-size: clamp(2rem, 6vw, 3.4rem);
-        line-height: 1;
-        text-wrap: balance;
-      }
-      .empty h2 { font-size: clamp(1.8rem, 5vw, 2.4rem); }
-      .eyebrow {
-        margin: 0 0 0.4rem;
-        text-transform: uppercase;
-        letter-spacing: 0.15em;
-        color: var(--muted);
-        font-size: 0.75rem;
-      }
-      .embed {
-        margin: 1rem 0;
-        aspect-ratio: 16 / 9;
-        border-radius: 1rem;
+      .tune-main {
         overflow: hidden;
+      }
+      .video-frame {
+        aspect-ratio: 16 / 9;
         background: #000;
       }
-      iframe { width: 100%; height: 100%; border: 0; }
-      .notes {
-        margin: 0 0 1rem;
-        color: var(--muted);
+      .video-frame iframe,
+      .sheet-frame {
+        width: 100%;
+        height: 100%;
+        border: 0;
       }
-      .links, .vote-buttons {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.75rem;
-        align-items: center;
+      .tune-meta {
+        padding: 1rem 1rem 1.15rem;
+      }
+      h1 {
+        margin: 0;
+        font-size: clamp(2rem, 4vw, 3.5rem);
+        line-height: 0.98;
+        text-wrap: balance;
       }
       .badges {
         display: flex;
@@ -951,46 +956,87 @@ function renderHomeHtml({
         gap: 0.5rem;
         list-style: none;
         padding: 0;
-        margin: 0 0 1rem;
+        margin: 0.85rem 0 0;
       }
       .badge {
         display: inline-flex;
         align-items: center;
         border: 1px solid var(--line);
         border-radius: 999px;
-        padding: 0.25rem 0.7rem;
-        background: #fff;
+        padding: 0.3rem 0.7rem;
+        background: rgba(255,255,255,0.82);
         color: var(--muted);
         font-size: 0.9rem;
       }
-      .primary, .secondary, .vote, .open-submit {
+      .notes {
+        margin: 0.85rem 0 0;
+        color: var(--muted);
+      }
+      .vote-box {
+        margin-top: 1rem;
+      }
+      .vote-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+      }
+      .vote, .icon-button, .fab {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 0.4rem;
-        min-height: 2.8rem;
-        padding: 0.7rem 1rem;
+        gap: 0.35rem;
+        min-height: 3rem;
         border-radius: 999px;
         border: 1px solid transparent;
         text-decoration: none;
         cursor: pointer;
       }
-      .primary, .open-submit {
-        background: var(--accent);
-        color: var(--accent-ink);
-      }
-      .secondary, .vote {
-        background: #fff;
+      .vote, .icon-button {
+        min-width: 3.25rem;
+        padding: 0.75rem 1rem;
+        background: rgba(255,255,255,0.85);
         border-color: var(--line);
+        color: var(--ink);
       }
-      .vote-box {
-        margin-top: 1rem;
-        padding-top: 1rem;
-        border-top: 1px solid var(--line);
-      }
-      .vote-box p { margin: 0 0 0.75rem; color: var(--muted); }
       .vote.active.up { border-color: #8bc89a; color: var(--good); }
       .vote.active.down { border-color: #d4a7a7; color: var(--bad); }
+      .icon-button {
+        font-size: 1.2rem;
+      }
+      .vote-error {
+        margin: 0 0 0.75rem;
+        color: var(--muted);
+      }
+      .sheet-panel {
+        position: relative;
+        min-height: 100%;
+        overflow: hidden;
+      }
+      .sheet-frame {
+        min-height: 44rem;
+        background: #fff;
+      }
+      .sheet-link {
+        position: absolute;
+        top: 0.85rem;
+        right: 0.85rem;
+        z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.75rem;
+        height: 2.75rem;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: rgba(255,255,255,0.92);
+        text-decoration: none;
+        box-shadow: 0 0.3rem 1rem rgba(34, 24, 16, 0.08);
+      }
+      .empty-state {
+        padding: 2rem;
+        max-width: 32rem;
+      }
       dialog {
         width: min(40rem, calc(100vw - 2rem));
         border: 0;
@@ -1000,7 +1046,7 @@ function renderHomeHtml({
       }
       dialog::backdrop { background: rgba(32, 22, 15, 0.55); }
       .modal-card {
-        background: #fffdf8;
+        background: var(--panel-solid);
         border: 1px solid var(--line);
         border-radius: 1.25rem;
         padding: 1rem;
@@ -1053,25 +1099,57 @@ function renderHomeHtml({
         gap: 0.75rem;
         margin-top: 1rem;
       }
+      .primary {
+        min-height: 2.8rem;
+        padding: 0.7rem 1rem;
+        border-radius: 999px;
+        border: 1px solid transparent;
+        background: var(--accent);
+        color: var(--accent-ink);
+        cursor: pointer;
+      }
+      .fab {
+        position: fixed;
+        right: 1rem;
+        bottom: 1rem;
+        width: 3.75rem;
+        height: 3.75rem;
+        padding: 0;
+        background: var(--accent);
+        color: var(--accent-ink);
+        box-shadow: 0 1rem 2rem rgba(165, 58, 27, 0.28);
+        font-size: 2rem;
+      }
+      @media (max-width: 900px) {
+        .tune-stage.has-sheet {
+          grid-template-columns: 1fr;
+        }
+        .sheet-frame {
+          min-height: 32rem;
+        }
+      }
       @media (max-width: 640px) {
-        .shell { padding-top: 1.25rem; }
-        .tune-card, .submit-card, .modal-card { padding: 1rem; }
+        .shell {
+          padding: 0.75rem 0.75rem 6rem;
+        }
+        .tune-meta,
+        .modal-card,
+        .empty-state {
+          padding: 0.9rem;
+        }
+        .sheet-frame {
+          min-height: 22rem;
+        }
       }
     </style>
   </head>
   <body>
     <main class="shell">
-      <header class="hero">
-        <h1>what tune should I practice?</h1>
-        <p class="lede">Traditional tunes only. Press the button, get a video, grab the dots if available, and go woodshed for ten minutes.</p>
-        <div class="hero-actions">
-          <a class="primary" href="/">Pick one for me</a>
-          <button class="open-submit" type="button" data-open-submit>Submit a tune</button>
-        </div>
-      </header>
       ${flash ? `<p class="flash ${flash.kind}">${escapeHtml(flash.message)}</p>` : ''}
       ${tuneSection}
     </main>
+
+    <button class="fab" type="button" data-open-submit aria-label="Submit a tune" title="Submit a tune">+</button>
 
     <dialog data-submit-dialog${dialogOpen} aria-labelledby="submit-title">
       ${renderSubmissionPanel(tags, draft)}
